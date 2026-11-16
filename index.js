@@ -1,14 +1,10 @@
-
-import makeWASocket, {
-  useMultiFileAuthState,
-  DisconnectReason
-} from "@whiskeysockets/baileys";
+import makeWASocket, { useMultiFileAuthState, DisconnectReason } from "@whiskeysockets/baileys";
+import http from "http";
 
 const conversations = new Map();
 
 async function askAI(message, jid) {
   const history = conversations.get(jid) || [];
-
   history.push({ role: "user", parts: [{ text: message }] });
 
   const response = await fetch(
@@ -19,13 +15,7 @@ async function askAI(message, jid) {
       body: JSON.stringify({
         systemInstruction: {
           parts: [{
-            text: `You are a friendly human-like WhatsApp conversation partner.
-Reply naturally, warmly and casually.
-Use simple everyday English.
-Keep replies short and conversational.
-Use emojis occasionally, not excessively.
-Understand the conversation before responding.
-Never sound like a customer service robot.`
+            text: `You are a friendly human-like WhatsApp conversation partner. Reply naturally, warmly and casually. Use simple everyday English. Keep replies short and conversational. Use emojis occasionally, not excessively. Understand the conversation before responding. Never sound like a customer service robot.`
           }]
         },
         contents: history.slice(-12),
@@ -51,13 +41,11 @@ Never sound like a customer service robot.`
 
   history.push({ role: "model", parts: [{ text: reply }] });
   conversations.set(jid, history.slice(-12));
-
   return reply;
 }
 
 async function startBot() {
-  const { state, saveCreds } =
-    await useMultiFileAuthState("./auth_info");
+  const { state, saveCreds } = await useMultiFileAuthState("./auth_info");
 
   const sock = makeWASocket({
     auth: state,
@@ -76,7 +64,6 @@ async function startBot() {
 
     if (connection === "close") {
       const code = lastDisconnect?.error?.output?.statusCode;
-
       if (code !== DisconnectReason.loggedOut) {
         console.log("Reconnecting...");
         startBot();
@@ -93,7 +80,6 @@ async function startBot() {
       if (!msg.message || msg.key.fromMe) continue;
 
       const jid = msg.key.remoteJid;
-
       if (!jid || jid === "status@broadcast") continue;
 
       const text =
@@ -106,11 +92,8 @@ async function startBot() {
 
       try {
         console.log("Incoming message:", text);
-
         const reply = await askAI(text, jid);
-
         await sock.sendMessage(jid, { text: reply });
-
         console.log("AI replied successfully.");
       } catch (error) {
         console.error("Reply error:", error.message);
@@ -120,3 +103,11 @@ async function startBot() {
 }
 
 startBot().catch(console.error);
+
+// Tiny web server so Render sees an open port
+http
+  .createServer((req, res) => {
+    res.writeHead(200);
+    res.end("Bot is running");
+  })
+  .listen(process.env.PORT || 3000);
