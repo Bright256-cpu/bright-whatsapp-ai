@@ -49,11 +49,29 @@ async function startBot() {
 
   const sock = makeWASocket({
     auth: state,
-    printQRInTerminal: true,
-    browser: ["Bright AI", "Chrome", "1.0"]
+    browser: ["Ubuntu", "Chrome", "20.0.04"]
   });
 
   sock.ev.on("creds.update", saveCreds);
+
+  // Ask WhatsApp for a pairing code if this bot is not linked yet
+  if (!sock.authState.creds.registered) {
+    const phoneNumber = (process.env.PHONE_NUMBER || "").replace(/[^0-9]/g, "");
+    if (!phoneNumber) {
+      console.log("Set the PHONE_NUMBER environment variable (digits only, with country code).");
+    } else {
+      setTimeout(async () => {
+        try {
+          const code = await sock.requestPairingCode(phoneNumber);
+          console.log("=================================");
+          console.log("YOUR WHATSAPP PAIRING CODE: " + code);
+          console.log("=================================");
+        } catch (error) {
+          console.error("Pairing code error:", error.message);
+        }
+      }, 5000);
+    }
+  }
 
   sock.ev.on("connection.update", async (update) => {
     const { connection, lastDisconnect } = update;
