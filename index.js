@@ -1,7 +1,10 @@
 import makeWASocket, { useMultiFileAuthState, DisconnectReason } from "@whiskeysockets/baileys";
 import http from "http";
+import QRCode from "qrcode";
 
 const conversations = new Map();
+let latestQR = null;
+let isOnline = false;
 
 async function askAI(message, jid) {
   const history = conversations.get(jid) || [];
@@ -54,33 +57,37 @@ async function startBot() {
 
   sock.ev.on("creds.update", saveCreds);
 
-  // Ask WhatsApp for a pairing code if this bot is not linked yet
-  if (!sock.authState.creds.registered) {
-    const phoneNumber = (process.env.PHONE_NUMBER || "").replace(/[^0-9]/g, "");
-    if (!phoneNumber) {
-      console.log("Set the PHONE_NUMBER environment variable (digits only, with country code).");
-    } else {
-      setTimeout(async () => {
-        try {
-          const code = await sock.requestPairingCode(phoneNumber);
-          console.log("=================================");
-          console.log("YOUR WHATSAPP PAIRING CODE: " + code);
-          console.log("=================================");
-        } catch (error) {
-          console.error("Pairing code error:", error.message);
-        }
-      }, 5000);
-    }
+  // Backup: ask WhatsApp for a pairing code if PHONE_NUMBER is set
+  if (!sock.authState.creds.registered && process.env.PHONE_NUMBER) {
+    const phoneNumber = process.env.PHONE_NUMBER.replace(/[^0-9]/g, "");
+    setTimeout(async () => {
+      try {
+        const code = await sock.requestPairingCode(phoneNumber);
+        console.log("=================================");
+        console.log("YOUR WHATSAPP PAIRING CODE: " + code);
+        console.log("=================================");
+      } catch (error) {
+        console.error("Pairing code error:", error.message);
+      }
+    }, 5000);
   }
 
   sock.ev.on("connection.update", async (update) => {
-    const { connection, lastDisconnect } = update;
+    const { connection, lastDisconnect, qr } = update;
+
+    if (qr) {
+      latestQR = qr;
+      console.log("New QR code ready. Open your Render address in a browser to scan it.");
+    }
 
     if (connection === "open") {
+      isOnline = true;
+      latestQR = null;
       console.log("Bright AI WhatsApp bot is online!");
     }
 
     if (connection === "close") {
+      isOnline = false;
       const code = lastDisconnect?.error?.output?.statusCode;
       if (code !== DisconnectReason.loggedOut) {
         console.log("Reconnecting...");
@@ -122,10 +129,26 @@ async function startBot() {
 
 startBot().catch(console.error);
 
-// Tiny web server so Render sees an open port
+// Web server: shows the QR code in your browser so you can scan it
 http
-  .createServer((req, res) => {
-    res.writeHead(200);
-    res.end("Bot is running");
+  .createServer(async (req, res) => {
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+
+    if (isOnline) {
+      res.end("<h2>Bot is online and linked to WhatsApp.</h2>");
+    } else if (latestQR) {
+      const image = await QRCode.toDataURL(latestQR, { width: 320 });
+      res.end(
+        `<meta http-equiv="refresh" content="20">` +
+        `<h2>Scan this with WhatsApp: Settings, Linked Devices, Link a Device</h2>` +
+        `<img src="${image}" alt="WhatsApp QR code">` +
+        `<p>This page refreshes by itself every 20 seconds.</p>`
+      );
+    } else {
+      res.end(
+        `<meta http-equiv="refresh" content="5">` +
+        `<h2>Starting up, the QR code will appear here in a few seconds...</h2>`
+      );
+    }
   })
   .listen(process.env.PORT || 3000);
